@@ -1,165 +1,152 @@
-# Real-Time Biosensor Spectrum Viewer
+# Real-Time Algae Biosensor — AS7431 + Arduino Uno
 
-A React app that connects to an Arduino spectral sensor over USB (Web Serial API)
-and plots live intensity readings as a color-coded bar chart.
-
----
-
-## Project Structure
-
-```
-src/
-├── App.jsx                          # Root component — composes the whole UI
-├── constants/
-│   └── bandColors.js                # Wavelength → hex color lookup table
-├── hooks/
-│   └── useArduino.js                # Custom hook: all Web Serial API logic
-└── components/
-    ├── ConnectionControls.jsx       # Connect / Disconnect button bar
-    └── SpectrumChart.jsx            # Recharts bar chart for spectral data
-```
+A React web application for monitoring algae health in real time using spectral analysis. Designed to detect heavy metal stress by tracking pigment changes across four computed stress indices, with live serial data streaming from an Arduino Uno and an AS7431 spectral sensor.
 
 ---
 
-## How It Works
+## What This Does
 
-### 1. `constants/bandColors.js`
+Heavy metals (copper, lead, cadmium, zinc, etc.) disrupt chlorophyll synthesis in algae, causing a characteristic color progression:
 
-A plain JavaScript object that maps each sensor band label (e.g. `"415nm"`) to its
-corresponding visible-light hex color. This is imported by `useArduino.js` to
-annotate chart data with a `fill` color before passing it to the chart.
+> **Dark green → Light green → Yellow → Brown/White → Death**
 
-```js
-// Example entry
-"555nm": "#00FF00"  // Green band → green bar
-```
-
-No logic here — pure data. If you add or rename channels on the Arduino side,
-update this file to match.
+This app captures that progression numerically — before it's even visible to the naked eye — by computing four spectral indices from live sensor readings and comparing them against a stored healthy baseline.
 
 ---
 
-### 2. `hooks/useArduino.js`
+## Hardware Setup
 
-The brain of the app. A custom React hook that owns all Web Serial state and logic.
+### Components
 
-**Returns:**
+| Part | Role |
+|---|---|
+| Arduino Uno | Microcontroller, serial host |
+| AS7431 spectral sensor | 8-channel + Clear + NIR spectral readings |
+| Quartz 10mm cuvette | Sample holder (quartz passes UV/visible cleanly) |
+| 5V white LED | Broadband excitation light source |
 
-| Name          | Type       | Description                                      |
-|---------------|------------|--------------------------------------------------|
-| `chartData`   | `Array`    | Formatted data ready for Recharts                |
-| `isConnected` | `boolean`  | `true` while a port is open and streaming        |
-| `connect`     | `Function` | Opens port, starts read loop                     |
-| `disconnect`  | `Function` | Cancels the reader, closes the port gracefully   |
+### Sensor Channels Used
 
-**`connect()` — step by step:**
+The AS7431 outputs intensity across 8 spectral bands. The indices in this app use:
 
-1. `navigator.serial.requestPort()` — shows the browser's port-picker dialog.
-2. `port.open({ baudRate: 115200 })` — opens the port. Must match the Arduino sketch.
-3. A `TextDecoderStream` is piped from `port.readable` so raw bytes become strings.
-4. A `while (true)` loop calls `reader.read()` on every iteration, appending chunks
-   to a string buffer, then splitting on `\n` to extract complete lines.
-5. Any line that looks like `{...}` (a JSON object) is parsed. The result is mapped
-   into the shape `{ wavelength, intensity, fill }` and stored via `setChartData`.
-6. When `disconnect()` is called, `reader.cancel()` resolves the pending `read()`
-   with `{ done: true }`, which exits the loop and runs the cleanup block.
+| Channel | Wavelength | Pigment relevance |
+|---|---|---|
+| F2 | 445 nm | Chlorophyll-a absorption peak (blue) |
+| F3 | 480 nm | Carotenoid / accessory pigment region |
+| F5 | 555 nm | Green reflectance (healthy algae) |
+| F6 | 590 nm | Yellow/orange — rises as chlorophyll degrades |
+| F8 | 680 nm | Chlorophyll-a absorption peak (red) |
+| Clear | — | Broadband — used to normalize ambient light |
 
-**Why `isAnimationActive={false}` on the chart bar?**
-Recharts animates on every data change by default. At the update frequency of a
-live sensor this causes flickering, so animation is disabled.
+### Physical Assembly Tips
 
----
+- Position the white LED and cuvette so the light path runs straight through the sample and into the AS7431 window.
+- Keep the assembly shielded from ambient room light (a small dark enclosure, black paper, or black foam works well). Room light changes will shift the Clear channel and can affect raw readings; the Stress Ratio index normalizes for this using the Clear channel.
+- Use the quartz cuvette (not glass) — borosilicate glass absorbs in the blue region near 445 nm and will distort the Chlorophyll Index.
+- Fill the cuvette with your algae suspension. For heavy metal experiments, prepare dilutions of your metal salt in the algae growth medium and replace the cuvette contents between measurements.
 
-### 3. `components/ConnectionControls.jsx`
+### Optional: Colored Films / Papers
 
-Pure presentational component. Renders either:
-- A blue **Connect Arduino** button (when `isConnected` is `false`), or
-- A green **Connected & Receiving Data** badge + a red **Disconnect** button.
+The colored films and papers available can be useful for:
 
-All interactivity is delegated upward via `onConnect` / `onDisconnect` props —
-this component holds no state of its own.
-
----
-
-### 4. `components/SpectrumChart.jsx`
-
-Renders a Recharts `BarChart` inside a `ResponsiveContainer` (full-width, 400 px tall).
-
-- **X-axis** — wavelength labels, rotated 45° to prevent overlap.
-- **Y-axis** — raw intensity counts (typically 0–65535 for a 16-bit sensor).
-- **Bars** — each bar's `fill` is taken directly from the `data` prop (set by
-  `useArduino`), so every band automatically gets its spectrum color.
-- **Tooltip** — default Recharts hover tooltip showing `wavelength` + `intensity`.
-
-**Prop:**
-
-| Name   | Type    | Description                                             |
-|--------|---------|---------------------------------------------------------|
-| `data` | `Array` | `[{ wavelength, intensity, fill }, ...]` from the hook |
+- **Calibration checks** — a green film simulates a healthy algae spectrum; yellow/orange films simulate a stressed state. Run a snap on each to verify your indices respond in the expected direction before using live algae.
+- **Blocking unwanted wavelengths** — if ambient fluorescent or LED room lighting is leaking into readings, a deep red or NIR-pass film over the sensor aperture can reduce visible-light contamination while still passing the 680 nm chlorophyll peak.
+- **Background subtraction reference** — photograph the cuvette against white paper under different stress levels to visually correlate with the numerical indices.
 
 ---
 
-### 5. `App.jsx`
+## The Four Stress Indices
 
-Thin root component. Calls `useArduino()` and passes the returned values down to
-`ConnectionControls` and `SpectrumChart`. Contains no serial or chart logic itself.
+All indices are computed live and compared against a stored baseline. The **delta** (% change from baseline) determines the status:
 
-```jsx
-const { chartData, isConnected, connect, disconnect } = useArduino();
-```
+| Delta from baseline | Status |
+|---|---|
+| 0 – 10% | 🟢 Healthy |
+| 10 – 25% | 🟡 Mild stress |
+| > 25% | 🔴 Stressed |
+
+### 1. Chlorophyll Index — `F8(680nm) / F2(445nm)`
+
+Measures chlorophyll-a concentration by ratioing its two main absorption peaks.
+
+- **Under stress:** decreases — chlorophyll breaks down faster than carotenoids
+- **Direction to watch:** falling value = deteriorating chlorophyll
+- **Note:** This index uses inverted thresholds internally — a negative delta is the danger sign, not a positive one.
+
+### 2. Car:Chl Ratio — `F3(480nm) / F8(680nm)`
+
+Carotenoids (480 nm) are more stable than chlorophyll under heavy metal exposure. As chlorophyll degrades, this ratio rises.
+
+- **Under stress:** increases — classic early-warning signal, often changes before visible yellowing
+- **Direction to watch:** rising value = stress beginning
+
+### 3. Yellow Index — `F6(590nm) / F3(480nm)`
+
+As chlorophyll degrades, yellow and orange xanthophyll pigments become dominant, pushing up the 590 nm band. The 110 nm gap between F6 and F3 gives strong contrast for this shift.
+
+- **Under stress:** increases — direct measure of yellowing / bleaching
+- **Direction to watch:** rising value = visible color shift underway or imminent
+
+### 4. Stress Ratio — `(F5+F6) / (F2+F8)` normalized by Clear
+
+Summarizes the overall spectral shift from blue-red (healthy) to green-yellow (stressed). Each channel is divided by the Clear broadband reading first to remove ambient light intensity effects, so only spectral *shape* changes are measured.
+
+- **Under stress:** increases — broad indicator of physiological deterioration
+- **Direction to watch:** rising value = overall pigment composition shifting
 
 ---
 
-## Arduino Serial Format
+## App Features
 
-The app expects the Arduino to send **one JSON object per line** at 115200 baud.
-Each key is a band label matching the keys in `bandColors.js`, and each value
-is an integer intensity reading:
+### Live Serial Streaming
+Connects to the Arduino over Web Serial (Chrome/Edge required). Data is parsed as JSON from the serial port at 115200 baud and fed into a live Recharts spectrum chart.
 
-```json
-{"415nm":120,"445nm":340,"480nm":890,"515nm":1204,"555nm":980,"590nm":760,"630nm":430,"680nm":210,"Clear":3200}
-```
+### Baseline Capture
+Snapshot the healthy algae spectrum as your reference point. Baselines persist across page refreshes via `localStorage`. All four index deltas are computed against this reference.
 
-Any line that does not start with `{` and end with `}` is silently ignored,
-so debug `Serial.print()` statements won't crash the parser.
+### Snap Recording
+Records 20 samples over 10 seconds (one every 500 ms) and writes them to a CSV file in a user-chosen directory using the File System Access API. Each CSV row includes:
+- Timestamp
+- All spectral channel intensities
+- All four computed index values at that moment
+- Overall stress status
+
+Snap files are numbered sequentially (`snap1.csv`, `snap2.csv`, …) and the counter persists across sessions.
+
+### Snap History Panel
+Displays a log of all completed snaps for the current session, including index values, deltas from baseline, and overall status — so you can track progression across time points or metal concentration steps without opening the CSV files.
+
+---
+
+## Suggested Experiment Protocol
+
+1. Prepare a healthy algae culture and let it stabilize.
+2. Fill the cuvette with the control (no metal), connect the sensor, and click **Set Baseline**.
+3. Confirm all four indices show 🟢 Healthy with delta near 0%.
+4. Replace the cuvette contents with your lowest metal concentration sample.
+5. Wait a few minutes for the algae to respond, then click **Snap** to record a 10-second time series.
+6. Repeat steps 4–5 across increasing concentrations.
+7. Export or review the snap CSVs and snap history panel to plot index trajectories against concentration.
+
+Expected pattern as metal concentration increases:
+- Chlorophyll Index ↓
+- Car:Chl Ratio ↑
+- Yellow Index ↑
+- Stress Ratio ↑
+- Overall status progresses: 🟢 → 🟡 → 🔴
+
+---
+
+## Technical Stack
+
+- **React** (Vite) — UI framework
+- **Recharts** — live spectrum bar chart
+- **Web Serial API** — serial communication with Arduino (Chrome/Edge only)
+- **File System Access API** — CSV file writing to local directory
+- **localStorage** — baseline and snap counter persistence
 
 ---
 
 ## Browser Requirements
 
-The Web Serial API is required. As of 2024 it is supported in:
-
-- **Chrome / Edge** 89+ (desktop only)
-- **Opera** 75+
-
-It is **not** supported in Firefox or Safari. The user must also grant the
-browser permission to access the serial port (the browser dialog handles this
-automatically when `requestPort()` is called).
-
----
-
-## Getting Started
-
-```bash
-# Install dependencies (Recharts is the only non-standard one)
-npm install recharts
-
-# Start the dev server
-npm start
-```
-
-1. Plug the Arduino in via USB.
-2. Upload your spectral sensor sketch (must output the JSON format above).
-3. Open the app in Chrome/Edge, click **Connect Arduino**, select the port, done.
-
----
-
-## Extending the App
-
-| Goal | Where to change |
-|------|----------------|
-| Add a new sensor channel | Add entry to `bandColors.js` and update Arduino sketch |
-| Change baud rate | Edit `baudRate` in `useArduino.js` `connect()` |
-| Save readings to CSV | Add export logic in `useArduino.js` after `setChartData` |
-| Show a line chart history | Replace `SpectrumChart` with a `LineChart` and keep a rolling buffer in the hook |
-| Style the UI differently | Edit inline styles in `ConnectionControls.jsx` and `SpectrumChart.jsx` |
+Chrome or Edge (desktop). Web Serial and File System Access APIs are not available in Firefox or Safari.

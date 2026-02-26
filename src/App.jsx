@@ -12,6 +12,8 @@ import useBaseline from './hooks/useBaseline';
 import BaselineControls from './components/BaselineControls';
 import useStressIndices from './hooks/useStressIndices';
 import StressIndexPanel from './components/StressIndexPanel';
+import useSnapHistory    from './hooks/useSnapHistory';
+import SnapHistoryPanel  from './components/SnapHistoryPanel';
 
 export default function App() {
   // ── Serial connection ──────────────────────────────────────────────────────
@@ -36,6 +38,8 @@ export default function App() {
   const { baseline, setBaseline, clearBaseline } = useBaseline();
 
   const indices = useStressIndices(chartData, baseline);
+
+  const { history, addEntry, clearHistory } = useSnapHistory();
 
   // ── Toolbar style ──────────────────────────────────────────────────────────
   const toolbarStyle = {
@@ -71,7 +75,7 @@ export default function App() {
           countdown={countdown}
           snapCount={snapCount}
           dirName={dirName}
-          onSnap={startSnap}
+          onSnap={() => startSnap(indices, addEntry)}
           onPickDir={pickDirectory}
           // Snap is only useful while live data is streaming
           disabled={!isConnected}
@@ -86,6 +90,11 @@ export default function App() {
       />
 
       <StressIndexPanel indices={indices} />
+
+      <SnapHistoryPanel
+        history={history}
+        onClear={clearHistory}
+      />
 
       {/* ── Live spectrum chart ─────────────────────────────────────────────── */}
       <SpectrumChart data={chartData} />

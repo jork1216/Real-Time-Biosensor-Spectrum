@@ -62,7 +62,7 @@ export default function useSnap(getLatestReading) {
   // ── startSnap ──────────────────────────────────────────────────────────────
   // Now accepts `indices` from useStressIndices so index values can be
   // captured at the moment each sample is taken and written to the CSV.
-  const startSnap = useCallback(async (indices) => {
+  const startSnap = useCallback(async (indices, addEntry) => {
     // Make sure we have a directory to write to
     if (!dirHandleRef.current) {
       await pickDirectory();
@@ -142,6 +142,7 @@ export default function useSnap(getLatestReading) {
 
         localStorage.setItem(STORAGE_KEY, String(thisSnapNumber));
         setSnapCount(thisSnapNumber);
+        addEntry(thisSnapNumber, indices);   
       } catch (err) {
         console.error('Failed to write CSV:', err);
       }
